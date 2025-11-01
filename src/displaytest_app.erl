@@ -33,6 +33,7 @@ start() ->
     displaytest_sup:start_link(?EPD_SETTINGS),
     epd:clear(),
     epd:checkerboard(abs(atomvm:random()) rem 128),
+    epd:sleep(),
     wait_forever().
 
 wait_forever() ->

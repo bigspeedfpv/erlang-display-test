@@ -3,7 +3,7 @@
 -export([start_link/1]).
 
 %% public API %%
--export([coords_for_index/1, clear/0, checkerboard/1]).
+-export([coords_for_index/1, clear/0, checkerboard/1, sleep/0, hw_reset/0]).
 
 -behaviour(gen_server).
 -export([init/1, handle_call/3, handle_cast/2]).
@@ -39,6 +39,12 @@ checkerboard(Size) ->
     Checkerboard = build_checkerboard(?PIXEL_COUNT, Size),
     gen_server:cast(epd, {show, Checkerboard}).
 
+sleep() ->
+    gen_server:cast(epd, sleep).
+
+hw_reset() ->
+    gen_server:cast(epd, hw_reset).
+
 %% GEN_SERVER FUNCTIONALITY %%
 
 -spec init(config()) -> {ok, #state{}}.
@@ -55,6 +61,12 @@ handle_call(_Msg, _From, State) ->
 
 handle_cast({show, Image}, State) ->
     epd_show(State, Image),
+    {noreply, State};
+handle_cast(sleep, State) ->
+    epd_sleep(State),
+    {noreply, State};
+handle_cast(hw_reset, State) ->
+    hw_reset(State),
     {noreply, State};
 handle_cast(_Msg, State) ->
     io:format("got cast~n"),
@@ -210,6 +222,9 @@ wait_for_low(Pin) ->
             timer:sleep(20),
             wait_for_low(Pin)
     end.
+
+epd_sleep(State) ->
+    send_command(State, 16#10).
 
 % NOTES SO I CAN STOP ALT TABBING vvvvvv
 % The EPD expects WIDTH*HEIGHT bits of info for b&w, with each bit being one pixel.
