@@ -32,6 +32,7 @@ start() ->
     gpio:open(),
     displaytest_sup:start_link(?EPD_SETTINGS),
     epd:clear(),
+    epd:checkerboard(abs(atomvm:random()) rem 128),
     wait_forever().
 
 wait_forever() ->
