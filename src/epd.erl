@@ -12,13 +12,17 @@
 -export_type([config/0]).
 
 -record(state, {
-    spi :: spi:spi(), dc_pin :: gpio:pin(), reset_pin :: gpio:pin(), busy_pin :: gpio:pin()
+    spi :: spi:spi(),
+    dc_pin :: gpio:pin(),
+    reset_pin :: gpio:pin(),
+    busy_pin :: gpio:pin(),
+    refreshes_since_full :: non_neg_integer()
 }).
 
 -define(DISPLAY_HEIGHT, 480).
 -define(DISPLAY_WIDTH, 280).
 -define(PIXEL_COUNT, ?DISPLAY_WIDTH * ?DISPLAY_HEIGHT).
--define(BW_BITSTRING_LEN, ?PIXEL_COUNT / 8).
+-define(REFRESH_THRESHOLD, 3).
 
 -include("luts.hrl").
 
@@ -52,7 +56,9 @@ init({{pins, Pins}, SpiSettings}) ->
     DcPin = proplists:get_value(dc, Pins),
     ResetPin = proplists:get_value(reset, Pins),
     BusyPin = proplists:get_value(busy, Pins),
-    State2 = hw_init(SpiSettings, #state{dc_pin = DcPin, reset_pin = ResetPin, busy_pin = BusyPin}),
+    State2 = hw_init(SpiSettings, #state{
+        dc_pin = DcPin, reset_pin = ResetPin, busy_pin = BusyPin, refreshes_since_full = 100
+    }),
     {ok, State2}.
 
 handle_call(_Msg, _From, State) ->
@@ -60,8 +66,8 @@ handle_call(_Msg, _From, State) ->
     {reply, 0, State}.
 
 handle_cast({show, Image}, State) ->
-    epd_show(State, Image),
-    {noreply, State};
+    State2 = epd_show(State, Image),
+    {noreply, State2};
 handle_cast(sleep, State) ->
     epd_sleep(State),
     {noreply, State};
@@ -132,7 +138,8 @@ hw_init(
 
     io:format("setting border~n"),
     send_command(State2, 16#3C),
-    send_data(State2, <<0>>),
+    % border white (VSL)
+    send_data(State2, <<2#01100000>>),
 
     io:format("setting softstart~n"),
     send_command(State2, 16#0C),
@@ -163,8 +170,10 @@ hw_init(
 
     State2.
 
--spec epd_show(State :: #state{}, Image :: binary()) -> ok.
-epd_show(#state{busy_pin = BusyPin} = State, Image) ->
+-spec epd_show(State :: #state{}, Image :: binary()) -> #state{}.
+epd_show(
+    #state{busy_pin = BusyPin, refreshes_since_full = RefreshCount} = State, Image
+) ->
     io:format("clearing~n"),
     send_command(State, 16#4E),
     send_data(State, <<0, 0>>),
@@ -177,11 +186,19 @@ epd_show(#state{busy_pin = BusyPin} = State, Image) ->
 
     io:format("writing lut~n"),
     send_command(State, 16#32),
-    send_data(State, ?LUT_GRAY1_GC),
+    {State2, Lut} =
+        case RefreshCount >= ?REFRESH_THRESHOLD of
+            true ->
+                io:format("full refresh~n"),
+                {State#state{refreshes_since_full = 0}, ?LUT_GRAY1_GC};
+            false ->
+                {State#state{refreshes_since_full = RefreshCount + 1}, ?LUT_GRAY1_DU}
+        end,
+    send_data(State, Lut),
 
     send_command(State, 16#20),
     wait_for_low(BusyPin),
-    ok.
+    State2.
 
 send_command(#state{spi = Spi, dc_pin = DcPin}, Cmd) ->
     gpio:digital_write(DcPin, low),
